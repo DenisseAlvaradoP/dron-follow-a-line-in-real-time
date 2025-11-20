@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+SEGUIDOR DE LINEA PARA PARROT BEBOP 2 - CAMARA FRONTAL
+Autor: ChatGPT para Denisse :)
+
+FUNCIONALIDADES:
+- Despegue automático
+- Visión por computadora con OpenCV
+- Segmentación por color (línea negra)
+- Cálculo del centroide de la línea
+- PID para controlar giro (yaw)
+- Avance automático mientras se mantiene la línea
+"""
+
+import rospy
+import cv2
+import numpy as np
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Image
+from std_msgs.msg import Empty
+from cv_bridge import CvBridge
+
+
+# =====================================================
+# PID Controller
+# =====================================================
+class PID:
+    def __init__(self, kp, ki, kd, lim_min=-0.3, lim_max=0.3):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+
+        self.prev_error = 0
+        self.integral = 0
+
+        self.lim_min = lim_min
+        self.lim_max = lim_max
+
+    def compute(self, error):
+        self.integral += error
+        derivative = error - self.prev_error
+        self.prev_error = error
+
+        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
+
+        # Saturación del PID
+        return max(self.lim_min, min(self.lim_max, output))
+
+
+# =====================================================
+# Nodo seguidor de línea
+# =====================================================
+class LineFollower:
+    def __init__(self):
+
+        rospy.init_node("bebop_line_follower")
+
+        self.bridge = CvBridge()
+
+        # Publicadores
+        self.cmd_pub = rospy.Publisher("/bebop/cmd_vel", Twist, queue_size=1)
+        self.takeoff_pub = rospy.Publisher("/bebop/takeoff", Empty, queue_size=1)
+        self.land_pub = rospy.Publisher("/bebop/land", Empty, queue_size=1)
+
+        # Suscriptor a cámara
+        rospy.Subscriber("/bebop/image_raw", Image, self.image_callback)
+
+        # PID para mantener la línea centrada
+        self.pid_yaw = PID(kp=0.0025, ki=0.0, kd=0.0015)
+
+        self.frame_w = 0
+        self.cmd = Twist()
+
+        rospy.sleep(2)
+
+        print(">>> DESPEGANDO...")
+        self.takeoff_pub.publish(Empty())
+        rospy.sleep(5)
+
+        print(">>> Iniciando seguimiento de línea...")
+
+    # ---------------------------------------------------------
+    # Procesar imagen
+    # ---------------------------------------------------------
+    def image_callback(self, data):
+        frame = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        self.frame_w = frame.shape[1]
+
+        # Convertir a HSV
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # ------------------------------
+        # Segmentar la línea negra
+        # ------------------------------
+        lower_black = np.array([0, 0, 0])
+        upper_black = np.array([180, 255, 60])
+        mask = cv2.inRange(hsv, lower_black, upper_black)
+
+        # Remover ruido
+        mask = cv2.GaussianBlur(mask, (7, 7), 0)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+
+        # Buscar contornos
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if len(contours) == 0:
+            print("No se ve la línea")
+            self.cmd.angular.z = 0
+            self.cmd.linear.x = 0.0
+            self.cmd_pub.publish(self.cmd)
+            return
+
+        # Tomar contorno más grande
+        c = max(contours, key=cv2.contourArea)
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            return
+
+        cx = int(M["m10"] / M["m00"])
+        error = cx - (self.frame_w // 2)
+
+        # --------------------------------------
+        # PID para girar hacia la línea
+        # --------------------------------------
+        yaw_correction = self.pid_yaw.compute(error)
+
+        # --------------------------------------
+        # Avance constante
+        # --------------------------------------
+        self.cmd.linear.x = 0.12   # lento para evitar oscilaciones
+        self.cmd.angular.z = -yaw_correction
+
+        self.cmd_pub.publish(self.cmd)
+
+        # --- Debug opcional en pantalla ----
+        cv2.circle(frame, (cx, 240), 7, (0, 0, 255), -1)
+        cv2.imshow("Seguidor Bebop", frame)
+        cv2.waitKey(1)
+
+
+# ===========================
+# MAIN
+# ===========================
+if __name__ == "__main__":
+    try:
+        LineFollower()
+        rospy.spin()
+    except KeyboardInterrupt:
+        print("Landing...")
+        self.land_pub.publish(Empty())
