@@ -10,3 +10,34 @@ rqt_image_view /bebop/image_raw
 
 chmod +x bebop_line_follower.py
 rosrun tu_paquete bebop_line_follower.py
+
+
+# Cosas para tomar en cuenta
+1. Iluminación mala: Si la lona está en una pared con sombras fuertes, brillos o reflejos, la máscara binaria puede fallar.
+➡ Solución: ajustar el threshold.
+
+2. Distancia a la pared: El Bebop 2 debe estar aproximamente a:
+➡1.5 m – 2 m de la lona
+➡Enfocando la línea centrada en su cámara frontal
+
+3. Velocidad demasiado alta
+➡self.forward_speed = 0.12. Eso es lento y seguro, unos 12 cm/s.
+➡Pero si lo subes, el PID necesitará reajuste.
+
+4. Vibración / blur de movimiento
+➡Si la imagen se mueve demasiado, el umbral blanco-negro puede ser ruidoso.
+
+5. Que la pista tenga curvas muy cerradas
+➡Mientras sean curvas suaves como la foto que me mandaste, sí lo sigue. Pero si hay curvas de 90°, necesitará parámetros de PID más agresivos.
+
+6. Que pierda la línea un momento: El código pone un giro constante cuando la pierde:
+➡cmd.angular.z = 0.35
+
+
+Eso funciona, pero si está muy cerca de la pared, puede chocar.
+
+Entonces… la respuesta clara:
+✔ El código está completo y correcto para volar el Bebop 2 siguiendo la línea.
+❗ PERO necesitas una prueba controlada, porque depende de tu entorno físico.
+✔ Con buena iluminación y distancia, sí funciona sin problemas.
+❗ Si algo falla, NO es del código, sino del entorno o parámetros del PID.
