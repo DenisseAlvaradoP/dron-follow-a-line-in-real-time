@@ -1,0 +1,12 @@
+1. Lanzar el driver del Bebop
+
+roslaunch bebop_driver bebop_node.launch
+
+2. Ver la cámara para comprobar
+
+rqt_image_view /bebop/image_raw
+
+3. Ejecutar el seguidor
+
+chmod +x bebop_line_follower.py
+rosrun tu_paquete bebop_line_follower.py
